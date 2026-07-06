@@ -262,27 +262,35 @@
         /* PREVIEW GRID */
         .preview-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
-            gap: 8px;
+            grid-template-columns: 140px 140px;
+            gap: 12px;
             margin-top: 12px;
+            grid-auto-rows: min-content;
         }
 
         .preview-item {
             position: relative;
-            aspect-ratio: 1;
             border-radius: 6px;
             overflow: hidden;
             border: 1px solid var(--border);
             background: #f0ede6;
+            display: flex;
+            flex-direction: column;
         }
 
-        .preview-item img {
+        .preview-img-wrapper {
+            position: relative;
+            aspect-ratio: 1;
+            width: 100%;
+        }
+
+        .preview-img-wrapper img {
             width: 100%;
             height: 100%;
             object-fit: cover;
         }
 
-        .preview-item .remove-btn {
+        .preview-img-wrapper .remove-btn {
             position: absolute;
             top: 4px;
             right: 4px;
@@ -300,7 +308,7 @@
             line-height: 1;
         }
 
-        .preview-item .compress-badge {
+        .preview-img-wrapper .compress-badge {
             position: absolute;
             bottom: 0;
             left: 0;
@@ -311,6 +319,43 @@
             text-align: center;
             padding: 2px 0;
             font-weight: 600;
+        }
+
+        .preview-controls {
+            display: flex;
+            gap: 4px;
+            padding: 4px;
+            background: #fff;
+            border-top: 1px solid var(--border);
+        }
+
+        .preview-controls input,
+        .preview-controls select {
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 0.7rem;
+            padding: 4px;
+            background: #fafaf8;
+            margin: 0;
+            min-width: 0;
+        }
+
+        .preview-controls input {
+            width: 36px;
+            text-align: center;
+            -moz-appearance: textfield;
+        }
+
+        .preview-controls input::-webkit-outer-spin-button,
+        .preview-controls input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        .preview-controls select {
+            flex: 1;
+            padding-right: 4px;
+            background-image: none;
         }
 
         /* RESULT TOGGLE */
@@ -799,6 +844,10 @@
                 <div id="up_defects" class="upload-field" data-label="Defect Pictures (Failed Report)"></div>
             </div>
 
+            <div id="totalSizeDisplay" style="text-align:center; font-size: 0.85rem; margin-bottom: 15px; font-weight: 600; color: var(--text-muted);">
+                Total Upload Size: <span id="totalSizeValue">0 KB</span> / 350 MB
+            </div>
+
             <div class="nav-buttons">
                 <button type="button" class="btn btn-secondary" onclick="prevStep()">← Back</button>
                 <button type="button" class="btn btn-submit" onclick="saveAndGeneratePDF()" id="submitBtn">
@@ -829,7 +878,8 @@
         const STEPS = ['Basic Info', 'Appearance', 'Packaging', 'Tests', 'Result'];
         const TOTAL_STEPS = 5;
         const MAX_W = 1200;
-        const QUALITY = 0.75;
+        const QUALITY = 0.65;
+
         
         window.addEventListener('DOMContentLoaded', () => {
             const initialResult = "{{ report_instance.status|default:'' }}";
@@ -854,6 +904,7 @@
                         renderPreview(fieldId);
                     }
                 }
+                setTimeout(updateTotalSize, 100);
             } catch(e) { console.error("Error loading images", e); }
             {% endif %}
         });
@@ -909,6 +960,7 @@
             const count = state.uploads[fieldId].length;
             const saved = state.uploads[fieldId].reduce((acc, i) => acc + (i.origSize - i.compSize), 0);
             status.textContent = count > 0 ? `${count} image(s) • saved ~${formatBytes(saved)}` : '';
+            updateTotalSize();
         }
 
         // ─── COMPRESS ────────────────────────────────────────────────────────────────
@@ -935,16 +987,79 @@
         function renderPreview(fieldId) {
             const grid = document.getElementById('preview_' + fieldId);
             grid.innerHTML = '';
+            
+            // Recalculate order and position based strictly on array index
+            state.uploads[fieldId].forEach((item, idx) => {
+                item.order = Math.floor(idx / 2) + 1;
+                item.position = (idx % 2 === 0) ? 'Left' : 'Right';
+            });
+
             state.uploads[fieldId].forEach((item, idx) => {
                 const div = document.createElement('div');
                 div.className = 'preview-item';
+                div.draggable = true;
+                
+                div.ondragstart = (e) => {
+                    e.dataTransfer.setData('text/plain', idx);
+                    e.dataTransfer.effectAllowed = 'move';
+                    setTimeout(() => { div.style.opacity = '0.5'; }, 0);
+                };
+                div.ondragend = (e) => {
+                    div.style.opacity = '1';
+                };
+                div.ondragover = (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                };
+                div.ondrop = (e) => {
+                    e.preventDefault();
+                    const fromIdx = parseInt(e.dataTransfer.getData('text/plain'));
+                    if (fromIdx !== idx && !isNaN(fromIdx)) {
+                        const arr = state.uploads[fieldId];
+                        const [movedItem] = arr.splice(fromIdx, 1);
+                        arr.splice(idx, 0, movedItem);
+                        renderPreview(fieldId);
+                        updateTotalSize();
+                    }
+                };
+
+                // Place in explicit 2-column grid
+                div.style.gridColumn = item.position === 'Right' ? '2' : '1';
+                div.style.gridRow = item.order;
+
                 div.innerHTML = `
-      <img src="${item.dataURL}" alt="${item.name}">
-      <button class="remove-btn" onclick="removeImage('${fieldId}', ${idx})">×</button>
-      <div class="compress-badge">${formatBytes(item.compSize)}</div>
+      <div class="preview-img-wrapper">
+        <img src="${item.dataURL}" alt="${item.name}">
+        <button class="remove-btn" onclick="removeImage('${fieldId}', ${idx})">×</button>
+        <div class="compress-badge">${formatBytes(item.compSize)}</div>
+      </div>
+      <div class="preview-controls">
+        <input type="number" value="${item.order}" onchange="moveToOrderPos('${fieldId}', ${idx}, this.value, '${item.position}')" class="preview-order">
+        <select onchange="moveToOrderPos('${fieldId}', ${idx}, '${item.order}', this.value)" class="preview-pos">
+          <option value="Left" ${item.position === 'Left' ? 'selected' : ''}>Left</option>
+          <option value="Right" ${item.position === 'Right' ? 'selected' : ''}>Right</option>
+        </select>
+      </div>
     `;
                 grid.appendChild(div);
             });
+        }
+
+        function moveToOrderPos(fieldId, currentIdx, targetOrder, targetPos) {
+            targetOrder = parseInt(targetOrder) || 1;
+            let targetIdx = (targetOrder - 1) * 2 + (targetPos === 'Right' ? 1 : 0);
+            const arr = state.uploads[fieldId];
+            
+            if (targetIdx >= arr.length) {
+                targetIdx = arr.length - 1;
+            }
+            if (targetIdx < 0) targetIdx = 0;
+            
+            if (targetIdx !== currentIdx) {
+                const [movedItem] = arr.splice(currentIdx, 1);
+                arr.splice(targetIdx, 0, movedItem);
+            }
+            renderPreview(fieldId);
         }
 
         function removeImage(fieldId, idx) {
@@ -952,6 +1067,25 @@
             renderPreview(fieldId);
             const count = state.uploads[fieldId].length;
             document.getElementById('status_' + fieldId).textContent = count > 0 ? `${count} image(s)` : '';
+            updateTotalSize();
+        }
+
+        function updateTotalSize() {
+            let totalBytes = 0;
+            for (const key in state.uploads) {
+                state.uploads[key].forEach(item => {
+                    totalBytes += item.dataURL ? item.dataURL.length : 0;
+                });
+            }
+            const display = document.getElementById('totalSizeValue');
+            if (display) {
+                display.textContent = formatBytes(totalBytes);
+                if (totalBytes > 350 * 1024 * 1024) {
+                    display.style.color = 'var(--fail)';
+                } else {
+                    display.style.color = 'inherit';
+                }
+            }
         }
 
         function formatBytes(b) {
@@ -1015,6 +1149,17 @@
 
         // ─── PDF GENERATION & SAVE ───────────────────────────────────────────────────
         async function saveAndGeneratePDF() {
+            let totalBytes = 0;
+            for (const key in state.uploads) {
+                state.uploads[key].forEach(item => {
+                    totalBytes += item.dataURL ? item.dataURL.length : 0;
+                });
+            }
+            if (totalBytes > 350 * 1024 * 1024) {
+                showToast('Total size exceeds 350MB. Please remove some images.');
+                return;
+            }
+
             showLoading('Saving report data...');
             const form = document.querySelector('form');
             const formData = new FormData(form);
@@ -1148,7 +1293,7 @@
                     ['Date of Inspection', document.getElementById('f_date').value],
                     ['Reference Number', document.getElementById('f_ref').value],
                     ['Item Code', document.getElementById('f_itemcode').value],
-                    ['Buyer Name', document.getElementById('f_buyer').value],
+                    ['Buyer Name', document.getElementById('f_buyer').selectedIndex > 0 ? document.getElementById('f_buyer').options[document.getElementById('f_buyer').selectedIndex].text.trim() : ''],
                     ['Internal PI No', document.getElementById('f_pino').value],
                     ['PO No.', document.getElementById('f_pono').value],
                     ['Collection', document.getElementById('f_collection').value],
@@ -1250,51 +1395,52 @@
                         sectionHeaderDrawn = true;
                     }
 
-                    // IMAGES (2 PER ROW)
-                    for (let i = 0; i < allImages.length; i += 2) {
-                        if (y + imgH + 20 > PH - MB) {
-                            doc.addPage();
-                            y = MT;
-                            addPageHeader();
-                        }
+                    // IMAGES (index % 2 logic)
+                    let currentMaxLines = 1;
+                    let currentRowSubHeaderH = 10; // default
 
-                        // LEFT IMAGE
-                        if (allImages[i]) {
-                            // Sub heading
-                            doc.setFillColor(184, 151, 58);
-                            doc.roundedRect(ML, y, imgW, 7, 1, 1, 'F');
-                            doc.setFont('helvetica', 'bold');
-                            doc.setFontSize(8);
-                            doc.setTextColor(255, 255, 255);
-                            doc.text(allImages[i].label.toUpperCase(), ML + 3, y + 4.8, { maxWidth: imgW - 6 });
+                    for (let i = 0; i < allImages.length; i++) {
+                        const isEven = (i % 2 === 0); // left column
+                        const isOdd = (i % 2 !== 0); // right column
 
-                            // Image
-                            doc.setFillColor(247, 245, 240);
-                            doc.setDrawColor(224, 217, 204);
-                            doc.roundedRect(ML, y + 7, imgW, imgH, 2, 2, 'FD');
-                            try { doc.addImage(allImages[i].dataURL, 'JPEG', ML + 1, y + 8, imgW - 2, imgH - 2); } catch (e) { }
-                        }
-
-                        // RIGHT IMAGE
-                        if (allImages[i + 1]) {
-                            const rightX = ML + imgW + 8;
+                        // If starting a new row (left image), check page bounds and calculate row height
+                        if (isEven) {
+                            let leftLines = doc.splitTextToSize(allImages[i].label.toUpperCase(), imgW - 6);
+                            let rightLines = [];
+                            if (allImages[i+1]) {
+                                rightLines = doc.splitTextToSize(allImages[i+1].label.toUpperCase(), imgW - 6);
+                            }
                             
-                            // Sub heading
-                            doc.setFillColor(184, 151, 58);
-                            doc.roundedRect(rightX, y, imgW, 7, 1, 1, 'F');
-                            doc.setFont('helvetica', 'bold');
-                            doc.setFontSize(8);
-                            doc.setTextColor(255, 255, 255);
-                            doc.text(allImages[i + 1].label.toUpperCase(), rightX + 3, y + 4.8, { maxWidth: imgW - 6 });
+                            currentMaxLines = Math.max(leftLines.length, rightLines.length);
+                            currentRowSubHeaderH = 3 + (currentMaxLines * 3.5);
 
-                            // Image
-                            doc.setFillColor(247, 245, 240);
-                            doc.setDrawColor(224, 217, 204);
-                            doc.roundedRect(rightX, y + 7, imgW, imgH, 2, 2, 'FD');
-                            try { doc.addImage(allImages[i + 1].dataURL, 'JPEG', rightX + 1, y + 8, imgW - 2, imgH - 2); } catch (e) { }
+                            if (y + imgH + currentRowSubHeaderH + 10 > PH - MB) {
+                                doc.addPage();
+                                y = MT;
+                                addPageHeader();
+                            }
                         }
 
-                        y += imgH + 7 + 4; // Sub-heading (7) + Image (imgH) + Spacing (4)
+                        let xPos = isEven ? ML : (ML + imgW + 8);
+                        let lines = doc.splitTextToSize(allImages[i].label.toUpperCase(), imgW - 6);
+
+                        // Sub heading
+                        doc.setFillColor(184, 151, 58);
+                        doc.roundedRect(xPos, y, imgW, currentRowSubHeaderH, 1, 1, 'F');
+                        doc.setTextColor(255, 255, 255);
+                        doc.text(lines, xPos + 3, y + 4.5);
+
+                        // Image
+                        doc.setFillColor(247, 245, 240);
+                        doc.setDrawColor(224, 217, 204);
+                        doc.roundedRect(xPos, y + currentRowSubHeaderH, imgW, imgH, 2, 2, 'FD');
+                        try { doc.addImage(allImages[i].dataURL, 'JPEG', xPos + 1, y + currentRowSubHeaderH + 1, imgW - 2, imgH - 2); } catch (e) { }
+
+                        // Move Y position down only after the right-side image is placed, 
+                        // or if the last image is alone on the left.
+                        if (isOdd || i === allImages.length - 1) {
+                            y += imgH + currentRowSubHeaderH + 4;
+                        }
                     }
                     y += 4;
                 }
