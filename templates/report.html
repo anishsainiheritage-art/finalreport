@@ -1431,10 +1431,20 @@
                         doc.text(lines, xPos + 3, y + 4.5);
 
                         // Image
-                        doc.setFillColor(247, 245, 240);
+                        doc.setFillColor(255, 255, 255);
                         doc.setDrawColor(224, 217, 204);
                         doc.roundedRect(xPos, y + currentRowSubHeaderH, imgW, imgH, 2, 2, 'FD');
-                        try { doc.addImage(allImages[i].dataURL, 'JPEG', xPos + 1, y + currentRowSubHeaderH + 1, imgW - 2, imgH - 2); } catch (e) { }
+                        try {
+                            let props = doc.getImageProperties(allImages[i].dataURL);
+                            let boxW = imgW - 2;
+                            let boxH = imgH - 2;
+                            let scale = Math.min(boxW / props.width, boxH / props.height);
+                            let newW = props.width * scale;
+                            let newH = props.height * scale;
+                            let offsetX = (boxW - newW) / 2;
+                            let offsetY = (boxH - newH) / 2;
+                            doc.addImage(allImages[i].dataURL, 'JPEG', xPos + 1 + offsetX, y + currentRowSubHeaderH + 1 + offsetY, newW, newH);
+                        } catch (e) { console.error(e); }
 
                         // Move Y position down only after the right-side image is placed, 
                         // or if the last image is alone on the left.
